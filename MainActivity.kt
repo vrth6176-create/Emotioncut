@@ -8,6 +8,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.*
 import android.provider.MediaStore
+import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.activity.ComponentActivity
@@ -27,6 +28,9 @@ class MainActivity : ComponentActivity() {
     lateinit var seqIn: EditText
     var vo: Uri? = null; var br: Uri? = null; var voMs = 0L; var brMs = 0L
     var segs = listOf<Seg>()
+    var pos = 2; var sizePct = 60; var calls = 0
+    val presets = listOf(Triple("Top Center", .5f, .12f), Triple("Upper Third", .5f, .25f), Triple("Center Focus", .5f, .5f),
+        Triple("Lower Third", .5f, .72f), Triple("Bottom Center", .5f, .88f), Triple("Left Focus", .25f, .5f), Triple("Right Focus", .75f, .5f))
     val bags = HashMap<String, ArrayDeque<Uri>>()
     val prefs by lazy { getSharedPreferences("folders", 0) }
 
@@ -66,6 +70,21 @@ class MainActivity : ComponentActivity() {
         btn("3. + Add Emotion Folder", col) { pickDir.launch(null) }
         btn("Remove all folders", col) { prefs.edit().clear().apply(); refresh() }
         col.addView(seqIn)
+        val lbl = TextView(this); lbl.setTextColor(Color.WHITE); lbl.text = "GIF position:"; col.addView(lbl)
+        val sp = Spinner(this); sp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, presets.map { it.first }); sp.setSelection(2)
+        sp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: View?, i: Int, id: Long) { pos = i }
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
+        col.addView(sp)
+        val sl = TextView(this); sl.setTextColor(Color.WHITE); sl.text = "GIF size: 60%"; col.addView(sl)
+        val sb = SeekBar(this); sb.max = 90; sb.progress = 50
+        sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { sizePct = p + 10; sl.text = "GIF size: $sizePct%" }
+            override fun onStartTrackingTouch(b: SeekBar?) {}
+            override fun onStopTrackingTouch(b: SeekBar?) {}
+        })
+        col.addView(sb)
         btn("4. Generate sequence", col) { generate() }
         btn("5. Export MP4", col) { export() }
         col.addView(status); col.addView(info); refresh()
@@ -94,18 +113,22 @@ class MainActivity : ComponentActivity() {
         try { segs.forEach { sg -> contentResolver.openInputStream(sg.uri)!!.use { sg.movie = Movie.decodeStream(it) } } }
         catch (e: Exception) { status.text = "GIF load error: ${e.message}"; return }
         val W = 540; val H = 960
-        val blank = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        val blank = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
         val overlay = object : BitmapOverlay() {
             override fun getBitmap(presentationTimeUs: Long): Bitmap {
+                calls++
                 val t = presentationTimeUs / 1e6
                 val sg = segs.firstOrNull { t >= it.start && t < it.end } ?: return blank
                 val m = sg.movie ?: return blank
+                if (m.width() == 0 || m.height() == 0) return blank
                 val d = m.duration().coerceAtLeast(1)
                 m.setTime((((t - sg.start) * 1000).toLong() % d).toInt())
                 val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
                 val c = Canvas(bmp)
-                val w = W * 0.6f; val sc = w / m.width(); val h = m.height() * sc
-                c.translate((W - w) / 2, (H - h) / 2); c.scale(sc, sc)
+                val w = W * sizePct / 100f; val sc = w / m.width(); val h = m.height() * sc
+                val pr = presets[pos]
+                val x = (W * pr.second - w / 2).coerceIn(0f, maxOf(0f, W - w)); val y = (H * pr.third - h / 2).coerceIn(0f, maxOf(0f, H - h))
+                c.translate(x, y); c.scale(sc, sc)
                 m.draw(c, 0f, 0f)
                 return bmp
             }
@@ -144,7 +167,7 @@ class MainActivity : ComponentActivity() {
         h.post(object : Runnable { override fun run() {
             if (tr.getProgress(ph) != Transformer.PROGRESS_STATE_NOT_STARTED && status.text.startsWith("Export").not() && !status.text.startsWith("Done")) { }
             if (!status.text.startsWith("Done") && !status.text.startsWith("Export failed")) {
-                status.text = "Exporting… ${ph.progress}%"; h.postDelayed(this, 500)
+                status.text = "Exporting… ${ph.progress}% (overlay calls: $calls)"; h.postDelayed(this, 500)
             }
         } })
     }
