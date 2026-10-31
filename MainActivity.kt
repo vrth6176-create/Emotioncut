@@ -28,7 +28,7 @@ class MainActivity : ComponentActivity() {
     lateinit var seqIn: EditText
     var vo: Uri? = null; var br: Uri? = null; var voMs = 0L; var brMs = 0L
     var segs = listOf<Seg>()
-    var pos = 2; var sizePct = 60; var calls = 0
+    var gifSec = 3; var pos = 2; var sizePct = 60; var calls = 0
     val presets = listOf(Triple("Top Center", .5f, .12f), Triple("Upper Third", .5f, .25f), Triple("Center Focus", .5f, .5f),
         Triple("Lower Third", .5f, .72f), Triple("Bottom Center", .5f, .88f), Triple("Left Focus", .25f, .5f), Triple("Right Focus", .75f, .5f))
     val bags = HashMap<String, ArrayDeque<Uri>>()
@@ -85,6 +85,14 @@ class MainActivity : ComponentActivity() {
             override fun onStopTrackingTouch(b: SeekBar?) {}
         })
         col.addView(sb)
+        val dl = TextView(this); dl.setTextColor(Color.WHITE); dl.text = "Seconds per GIF: 3 (0 = split equally, no loop)"; col.addView(dl)
+        val db = SeekBar(this); db.max = 10; db.progress = 3
+        db.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { gifSec = p; dl.text = if (p == 0) "Seconds per GIF: 0 (split equally, no loop)" else "Seconds per GIF: $p (sequence loops until audio ends)" }
+            override fun onStartTrackingTouch(b: SeekBar?) {}
+            override fun onStopTrackingTouch(b: SeekBar?) {}
+        })
+        col.addView(db)
         btn("4. Generate sequence", col) { generate() }
         btn("5. Export MP4", col) { export() }
         col.addView(status); col.addView(info); refresh()
@@ -93,23 +101,27 @@ class MainActivity : ComponentActivity() {
     fun generate() {
         if (voMs == 0L) { status.text = "Select a voiceover first"; return }
         val names = seqIn.text.split(",", "\n").map { it.trim() }.filter { it.isNotEmpty() }
+        if (names.isEmpty()) { status.text = "Type your emotions first"; return }
+        val keys = names.map { n -> prefs.all.keys.firstOrNull { it.equals(n, true) } ?: run { status.text = "No folder registered for \"$n\""; return } }
+        val d = voMs / 1000.0
+        val count = if (gifSec == 0) keys.size else Math.ceil(d / gifSec).toInt()
         val out = ArrayList<Seg>()
-        for (n in names) {
-            val key = prefs.all.keys.firstOrNull { it.equals(n, true) }
-            if (key == null) { status.text = "No folder registered for \"$n\""; return }
+        for (i in 0 until count) {
+            val key = keys[i % keys.size]
             val bag = bags.getOrPut(key) { ArrayDeque() }
             if (bag.isEmpty()) bag.addAll(gifs(key).shuffled())
             if (bag.isEmpty()) { status.text = "Folder \"$key\" has no GIFs / needs re-adding"; return }
-            out.add(Seg(key, bag.removeFirst()))
+            val sg = Seg(key, bag.removeFirst())
+            if (gifSec == 0) { sg.start = d * i / count; sg.end = d * (i + 1) / count }
+            else { sg.start = i * gifSec.toDouble(); sg.end = minOf((i + 1) * gifSec.toDouble(), d) }
+            out.add(sg)
         }
-        val d = voMs / 1000.0
-        out.forEachIndexed { i, s -> s.start = d * i / out.size; s.end = d * (i + 1) / out.size }
-        segs = out; status.text = "Generated ${out.size} segments"; refresh()
+        segs = out; status.text = "Generated ${out.size} segments for ${d.toInt()}s"; refresh()
     }
 
     fun export() {
         val v = vo; val b = br
-        if (v == null || b == null || segs.isEmpty()) { status.text = "Need voiceover, B-roll and a generated sequence"; return }
+        if (v == null || b == null || segs.isEmpty() || brMs <= 0) { status.text = "Need voiceover, B-roll and a generated sequence"; return }
         try { segs.forEach { sg -> contentResolver.openInputStream(sg.uri)!!.use { sg.movie = Movie.decodeStream(it) } } }
         catch (e: Exception) { status.text = "GIF load error: ${e.message}"; return }
         val W = 540; val H = 960
