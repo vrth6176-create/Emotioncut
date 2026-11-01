@@ -122,14 +122,15 @@ class MainActivity : ComponentActivity() {
     fun export() {
         val v = vo; val b = br
         if (v == null || b == null || segs.isEmpty() || brMs <= 0) { status.text = "Need voiceover, B-roll and a generated sequence"; return }
-        try { segs.forEach { sg -> contentResolver.openInputStream(sg.uri)!!.use { sg.movie = Movie.decodeStream(it) } } }
+        try { segs.forEach { sg -> val bytes = contentResolver.openInputStream(sg.uri)!!.use { it.readBytes() }; sg.movie = Movie.decodeByteArray(bytes, 0, bytes.size) }
+            val bad = segs.firstOrNull { it.movie == null }; if (bad != null) { status.text = "Could not decode GIF: ${DocumentFile.fromSingleUri(this, bad.uri)?.name}"; return } }
         catch (e: Exception) { status.text = "GIF load error: ${e.message}"; return }
         val W = 540; val H = 960
         val blank = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
-        val overlay = object : BitmapOverlay() {
+        fun mk(off: Double) = object : BitmapOverlay() {
             override fun getBitmap(presentationTimeUs: Long): Bitmap {
                 calls++
-                val t = presentationTimeUs / 1e6
+                val t = presentationTimeUs / 1e6 + off
                 val sg = segs.firstOrNull { t >= it.start && t < it.end } ?: return blank
                 val m = sg.movie ?: return blank
                 if (m.width() == 0 || m.height() == 0) return blank
@@ -149,13 +150,13 @@ class MainActivity : ComponentActivity() {
         while (acc < voMs) {
             val take = minOf(brMs, voMs - acc)
             val mi = MediaItem.Builder().setUri(b).setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setEndPositionMs(take).build()).build()
-            items.add(EditedMediaItem.Builder(mi).setRemoveAudio(true).build()); acc += take
+            val fx = Effects(listOf<androidx.media3.common.audio.AudioProcessor>(), listOf<Effect>(
+                Presentation.createForWidthAndHeight(720, 1280, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP),
+                OverlayEffect(ImmutableList.of<TextureOverlay>(mk(acc / 1000.0)))))
+            items.add(EditedMediaItem.Builder(mi).setRemoveAudio(true).setEffects(fx).build()); acc += take
         }
         val audio = EditedMediaItem.Builder(MediaItem.fromUri(v)).setRemoveVideo(true).build()
-        val fx = Effects(listOf<androidx.media3.common.audio.AudioProcessor>(), listOf<Effect>(
-            Presentation.createForWidthAndHeight(720, 1280, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP),
-            OverlayEffect(ImmutableList.of<TextureOverlay>(overlay))))
-        val comp = Composition.Builder(listOf(EditedMediaItemSequence(items), EditedMediaItemSequence(listOf(audio)))).setEffects(fx).build()
+        val comp = Composition.Builder(listOf(EditedMediaItemSequence(items), EditedMediaItemSequence(listOf(audio)))).build()
         val outFile = File(cacheDir, "out.mp4"); outFile.delete()
         val tr = Transformer.Builder(this).setVideoMimeType(MimeTypes.VIDEO_H264).setAudioMimeType(MimeTypes.AUDIO_AAC)
             .addListener(object : Transformer.Listener {
