@@ -31,7 +31,7 @@ class MainActivity : ComponentActivity() {
     var vo: Uri? = null; var br: Uri? = null; var voMs = 0L; var brMs = 0L
     var segs = listOf<Seg>()
     var curSeg: Seg? = null; var lastKey = -1L; var lastBmp: Bitmap? = null; var fails = 0
-    var gifSec = 3; var pos = 2; var sizePct = 60; var calls = 0
+    var gifSec = 3.0; var sizeWide = 80; var pos = 2; var sizePct = 60; var calls = 0
     val presets = listOf(Triple("Top Center", .5f, .12f), Triple("Upper Third", .5f, .25f), Triple("Center Focus", .5f, .5f),
         Triple("Lower Third", .5f, .72f), Triple("Bottom Center", .5f, .88f), Triple("Left Focus", .25f, .5f), Triple("Right Focus", .75f, .5f))
     val bags = HashMap<String, ArrayDeque<Uri>>()
@@ -102,18 +102,26 @@ class MainActivity : ComponentActivity() {
             override fun onNothingSelected(p: AdapterView<*>?) {}
         }
         col.addView(sp)
-        val sl = TextView(this); sl.setTextColor(Color.WHITE); sl.text = "GIF size: 60%"; col.addView(sl)
+        val sl = TextView(this); sl.setTextColor(Color.WHITE); sl.text = "Size for SQUARE GIFs: 60%"; col.addView(sl)
         val sb = SeekBar(this); sb.max = 90; sb.progress = 50
         sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { sizePct = p + 10; sl.text = "GIF size: $sizePct%" }
+            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { sizePct = p + 10; sl.text = "Size for SQUARE GIFs: $sizePct%" }
             override fun onStartTrackingTouch(b: SeekBar?) {}
             override fun onStopTrackingTouch(b: SeekBar?) {}
         })
         col.addView(sb)
-        val dl = TextView(this); dl.setTextColor(Color.WHITE); dl.text = "Seconds per GIF: 3 (0 = split equally, no loop)"; col.addView(dl)
-        val db = SeekBar(this); db.max = 10; db.progress = 3
+        val wl = TextView(this); wl.setTextColor(Color.WHITE); wl.text = "Size for NON-SQUARE GIFs: 80%"; col.addView(wl)
+        val wb = SeekBar(this); wb.max = 90; wb.progress = 70
+        wb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { sizeWide = p + 10; wl.text = "Size for NON-SQUARE GIFs: $sizeWide%" }
+            override fun onStartTrackingTouch(b: SeekBar?) {}
+            override fun onStopTrackingTouch(b: SeekBar?) {}
+        })
+        col.addView(wb)
+        val dl = TextView(this); dl.setTextColor(Color.WHITE); dl.text = "Seconds per GIF: 3.0 (0 = split equally, no loop)"; col.addView(dl)
+        val db = SeekBar(this); db.max = 40; db.progress = 12
         db.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { gifSec = p; dl.text = if (p == 0) "Seconds per GIF: 0 (split equally, no loop)" else "Seconds per GIF: $p (sequence loops until audio ends)" }
+            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { gifSec = p * 0.25; dl.text = if (p == 0) "Seconds per GIF: 0 (split equally, no loop)" else "Seconds per GIF: $gifSec (0.25 steps, sequence loops)" }
             override fun onStartTrackingTouch(b: SeekBar?) {}
             override fun onStopTrackingTouch(b: SeekBar?) {}
         })
@@ -133,14 +141,14 @@ class MainActivity : ComponentActivity() {
             key to r.substringAfter(":", "").trim().toDoubleOrNull()
         }
         val d = voMs / 1000.0
-        val equal = gifSec == 0 && items.all { it.second == null }
+        val equal = gifSec == 0.0 && items.all { it.second == null }
         val out = ArrayList<Seg>(); var t = 0.0; var i = 0
         while (t < d - 0.001 && out.size < 3000) {
             val (key, own) = items[i % items.size]
             val bag = bags.getOrPut(key) { ArrayDeque() }
             if (bag.isEmpty()) bag.addAll(gifs(key).shuffled())
             if (bag.isEmpty()) { status.text = "Folder \"$key\" has no GIFs / needs re-adding"; return }
-            val len = if (equal) d / items.size else own ?: (if (gifSec > 0) gifSec.toDouble() else 2.0)
+            val len = if (equal) d / items.size else own ?: (if (gifSec > 0) gifSec else 2.0)
             val sg = Seg(key, bag.removeFirst()); sg.start = t; sg.end = minOf(t + len, d)
             out.add(sg); t += len; i++
             if (equal && i >= items.size) break
@@ -173,7 +181,8 @@ class MainActivity : ComponentActivity() {
                 m.setTime(mt.toInt())
                 ri = (ri + 1) % 3; val bmp = ring[ri]; bmp.eraseColor(Color.TRANSPARENT)
                 val c = Canvas(bmp)
-                val w = W * sizePct / 100f; val sc = w / m.width(); val h = m.height() * sc
+                val pct = if (m.width().toFloat() / m.height() in 0.9f..1.1f) sizePct else sizeWide
+                val w = minOf(W * pct / 100f, H * 0.95f * m.width() / m.height()); val sc = w / m.width(); val h = m.height() * sc
                 val pr = presets[pos]
                 val x = (W * pr.second - w / 2).coerceIn(0f, maxOf(0f, W - w)); val y = (H * pr.third - h / 2).coerceIn(0f, maxOf(0f, H - h))
                 c.translate(x, y); c.scale(sc, sc)
