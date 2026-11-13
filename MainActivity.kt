@@ -31,7 +31,7 @@ class MainActivity : ComponentActivity() {
     var vo: Uri? = null; var br: Uri? = null; var voMs = 0L; var brMs = 0L
     var segs = listOf<Seg>()
     var curSeg: Seg? = null; var lastKey = -1L; var lastBmp: Bitmap? = null; var fails = 0
-    var maxH = 41; var gifSec = 3.0; var sizeWide = 73; var pos = 1; var sizePct = 59; var calls = 0
+    var maxH = 44; var gifSec = 3.0; var sizeWide = 78; var pos = 1; var sizePct = 19; var calls = 0
     val presets = listOf(Triple("Top Center", .5f, .12f), Triple("Upper Third", .5f, .25f), Triple("Center Focus", .5f, .5f),
         Triple("Lower Third", .5f, .72f), Triple("Bottom Center", .5f, .88f), Triple("Left Focus", .25f, .5f), Triple("Right Focus", .75f, .5f))
     val bags = HashMap<String, ArrayDeque<Uri>>()
@@ -102,26 +102,26 @@ class MainActivity : ComponentActivity() {
             override fun onNothingSelected(p: AdapterView<*>?) {}
         }
         col.addView(sp)
-        val sl = TextView(this); sl.setTextColor(Color.WHITE); sl.text = "Size for SQUARE GIFs: 59%"; col.addView(sl)
-        val sb = SeekBar(this); sb.max = 90; sb.progress = 49
+        val sl = TextView(this); sl.setTextColor(Color.WHITE); sl.text = "GIF size (same visual size for every shape): 19%"; col.addView(sl)
+        val sb = SeekBar(this); sb.max = 40; sb.progress = 14
         sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { sizePct = p + 10; sl.text = "Size for SQUARE GIFs: $sizePct%" }
+            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { sizePct = p + 5; sl.text = "GIF size (same visual size for every shape): $sizePct%" }
             override fun onStartTrackingTouch(b: SeekBar?) {}
             override fun onStopTrackingTouch(b: SeekBar?) {}
         })
         col.addView(sb)
-        val wl = TextView(this); wl.setTextColor(Color.WHITE); wl.text = "Size for NON-SQUARE GIFs: 73%"; col.addView(wl)
-        val wb = SeekBar(this); wb.max = 90; wb.progress = 63
+        val wl = TextView(this); wl.setTextColor(Color.WHITE); wl.text = "Max width (wide GIFs): 78%"; col.addView(wl)
+        val wb = SeekBar(this); wb.max = 90; wb.progress = 68
         wb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { sizeWide = p + 10; wl.text = "Size for NON-SQUARE GIFs: $sizeWide%" }
+            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { sizeWide = p + 10; wl.text = "Max width (wide GIFs): $sizeWide%" }
             override fun onStartTrackingTouch(b: SeekBar?) {}
             override fun onStopTrackingTouch(b: SeekBar?) {}
         })
         col.addView(wb)
-        val hl = TextView(this); hl.setTextColor(Color.WHITE); hl.text = "Max GIF height (tall GIFs): 41%"; col.addView(hl)
-        val hb = SeekBar(this); hb.max = 60; hb.progress = 31
+        val hl = TextView(this); hl.setTextColor(Color.WHITE); hl.text = "Max height (tall GIFs): 44%"; col.addView(hl)
+        val hb = SeekBar(this); hb.max = 60; hb.progress = 34
         hb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { maxH = p + 10; hl.text = "Max GIF height (tall GIFs): $maxH%" }
+            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { maxH = p + 10; hl.text = "Max height (tall GIFs): $maxH%" }
             override fun onStartTrackingTouch(b: SeekBar?) {}
             override fun onStopTrackingTouch(b: SeekBar?) {}
         })
@@ -189,8 +189,8 @@ class MainActivity : ComponentActivity() {
                 m.setTime(mt.toInt())
                 ri = (ri + 1) % 3; val bmp = ring[ri]; bmp.eraseColor(Color.TRANSPARENT)
                 val c = Canvas(bmp)
-                val pct = if (m.width().toFloat() / m.height() in 0.9f..1.1f) sizePct else sizeWide
-                val w = minOf(W * pct / 100f, H * maxH / 100f * m.width() / m.height()); val sc = w / m.width(); val h = m.height() * sc
+                val ar = m.width().toFloat() / m.height()
+                val w = minOf(Math.sqrt(sizePct / 100.0 * W * H * ar).toFloat(), W * sizeWide / 100f, H * maxH / 100f * ar); val sc = w / m.width(); val h = m.height() * sc
                 val pr = presets[pos]
                 val x = (W * pr.second - w / 2).coerceIn(0f, maxOf(0f, W - w)); val y = (H * pr.third - h / 2).coerceIn(0f, maxOf(0f, H - h))
                 c.translate(x, y); c.scale(sc, sc)
