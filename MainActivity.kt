@@ -31,9 +31,10 @@ class MainActivity : ComponentActivity() {
     var vo: Uri? = null; var br: Uri? = null; var voMs = 0L; var brMs = 0L
     var segs = listOf<Seg>()
     var curSeg: Seg? = null; var lastKey = -1L; var lastBmp: Bitmap? = null; var fails = 0
-    var maxH = 44; var gifSec = 3.0; var sizeWide = 80; var pos = 1; var sizePct = 19; var calls = 0
+    var sharp = 40; var fb: Bitmap? = null; var maxH = 44; var gifSec = 3.0; var sizeWide = 80; var pos = 1; var sizePct = 19; var calls = 0
     val presets = listOf(Triple("Top Center", .5f, .12f), Triple("Upper Third", .5f, .25f), Triple("Center Focus", .5f, .5f),
         Triple("Lower Third", .5f, .72f), Triple("Bottom Center", .5f, .88f), Triple("Left Focus", .25f, .5f), Triple("Right Focus", .75f, .5f))
+    var hd = false
     val bags = HashMap<String, ArrayDeque<Uri>>()
     val prefs by lazy { getSharedPreferences("folders", 0) }
 
@@ -126,6 +127,14 @@ class MainActivity : ComponentActivity() {
             override fun onStopTrackingTouch(b: SeekBar?) {}
         })
         col.addView(hb)
+        val shl = TextView(this); shl.setTextColor(Color.WHITE); shl.text = "Sharpness: 40%"; col.addView(shl)
+        val shb = SeekBar(this); shb.max = 100; shb.progress = 40
+        shb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(b: SeekBar?, p: Int, u: Boolean) { sharp = p; shl.text = "Sharpness: $p%" }
+            override fun onStartTrackingTouch(b: SeekBar?) {}
+            override fun onStopTrackingTouch(b: SeekBar?) {}
+        })
+        col.addView(shb)
         val dl = TextView(this); dl.setTextColor(Color.WHITE); dl.text = "Seconds per GIF: 3.0 (0 = split equally, no loop)"; col.addView(dl)
         val db = SeekBar(this); db.max = 40; db.progress = 12
         db.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -134,6 +143,8 @@ class MainActivity : ComponentActivity() {
             override fun onStopTrackingTouch(b: SeekBar?) {}
         })
         col.addView(db)
+        val cb = CheckBox(this); cb.setTextColor(Color.WHITE); cb.text = "1080p export (sharper, slower, uses more memory)"
+        cb.setOnCheckedChangeListener { _, c -> hd = c }; col.addView(cb)
         btn("4. Generate sequence", col) { generate() }
         btn("5. Export MP4", col) { export() }
         col.addView(status); col.addView(info); scanAll()
@@ -164,11 +175,33 @@ class MainActivity : ComponentActivity() {
         segs = out; status.text = "Generated ${out.size} segments for ${d.toInt()}s"; refresh()
     }
 
+    fun ch(c: Int, u: Int, d: Int, l: Int, r: Int, sh: Int, a: Float): Int {
+        val v = ((c shr sh) and 255) * (1 + 4 * a) - a * (((u shr sh) and 255) + ((d shr sh) and 255) + ((l shr sh) and 255) + ((r shr sh) and 255))
+        return v.toInt().coerceIn(0, 255) shl sh
+    }
+
+    fun sharpenRegion(bmp: Bitmap, x0: Int, y0: Int, w0: Int, h0: Int, a: Float) {
+        if (a <= 0f) return
+        val x = x0.coerceIn(0, bmp.width - 1); val y = y0.coerceIn(0, bmp.height - 1)
+        val w = minOf(w0, bmp.width - x); val h = minOf(h0, bmp.height - y)
+        if (w < 3 || h < 3) return
+        val src = IntArray(w * h); bmp.getPixels(src, 0, w, x, y, w, h)
+        val dst = src.copyOf()
+        for (j in 1 until h - 1) for (i in 1 until w - 1) {
+            val k = j * w + i; val c = src[k]
+            if ((c ushr 24) == 0) continue
+            val u = src[k - w]; val d = src[k + w]; val l = src[k - 1]; val r = src[k + 1]
+            dst[k] = (c and 0xFF000000.toInt()) or ch(c, u, d, l, r, 16, a) or ch(c, u, d, l, r, 8, a) or ch(c, u, d, l, r, 0, a)
+        }
+        bmp.setPixels(dst, 0, w, x, y, w, h)
+    }
+
     fun export() {
         val v = vo; val b = br
         if (v == null || b == null || segs.isEmpty() || brMs <= 0) { status.text = "Need voiceover, B-roll and a generated sequence"; return }
         calls = 0; fails = 0; curSeg = null; lastBmp = null
-        val W = 540; val H = 960
+        val W = if (hd) 1080 else 720; val H = if (hd) 1920 else 1280
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
         val blank = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
         val ring = Array(3) { Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888) }; var ri = 0
         fun mk(off: Double) = object : BitmapOverlay() {
@@ -193,8 +226,11 @@ class MainActivity : ComponentActivity() {
                 val w = if (ar > 1.25f) minOf(W * sizeWide / 100f, H * maxH / 100f * ar) else minOf(Math.sqrt(sizePct / 100.0 * W * H * ar).toFloat(), W * 0.9f, H * maxH / 100f * ar); val sc = w / m.width(); val h = m.height() * sc
                 val pr = presets[pos]
                 val x = (W * pr.second - w / 2).coerceIn(0f, maxOf(0f, W - w)); val y = (H * pr.third - h / 2).coerceIn(0f, maxOf(0f, H - h))
-                c.translate(x, y); c.scale(sc, sc)
-                m.draw(c, 0f, 0f)
+                val mw = m.width(); val mh = m.height()
+                var tb = fb; if (tb == null || tb.width != mw || tb.height != mh) { tb = Bitmap.createBitmap(mw, mh, Bitmap.Config.ARGB_8888); fb = tb }
+                tb.eraseColor(Color.TRANSPARENT); m.draw(Canvas(tb), 0f, 0f)
+                c.drawBitmap(tb, null, RectF(x, y, x + w, y + h), paint)
+                sharpenRegion(bmp, x.toInt(), y.toInt(), w.toInt(), h.toInt(), sharp / 100f * 0.9f)
                 lastBmp = bmp; lastKey = key
                 return bmp
             }
@@ -204,14 +240,16 @@ class MainActivity : ComponentActivity() {
             val take = minOf(brMs, voMs - acc)
             val mi = MediaItem.Builder().setUri(b).setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setEndPositionMs(take).build()).build()
             val fx = Effects(listOf<androidx.media3.common.audio.AudioProcessor>(), listOf<Effect>(
-                Presentation.createForWidthAndHeight(720, 1280, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP),
+                Presentation.createForWidthAndHeight(W, H, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP),
                 OverlayEffect(ImmutableList.of<TextureOverlay>(mk(acc / 1000.0)))))
             items.add(EditedMediaItem.Builder(mi).setRemoveAudio(true).setEffects(fx).build()); acc += take
         }
         val audio = EditedMediaItem.Builder(MediaItem.fromUri(v)).setRemoveVideo(true).build()
         val comp = Composition.Builder(listOf(EditedMediaItemSequence(items), EditedMediaItemSequence(listOf(audio)))).build()
         val outFile = File(cacheDir, "out.mp4"); outFile.delete()
-        val tr = Transformer.Builder(this).setVideoMimeType(MimeTypes.VIDEO_H264).setAudioMimeType(MimeTypes.AUDIO_AAC)
+        val tr = Transformer.Builder(this)
+            .setEncoderFactory(DefaultEncoderFactory.Builder(this).setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(if (hd) 15_000_000 else 10_000_000).build()).build())
+            .setVideoMimeType(MimeTypes.VIDEO_H264).setAudioMimeType(MimeTypes.AUDIO_AAC)
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, r: ExportResult) {
                     val cv = ContentValues().apply {
