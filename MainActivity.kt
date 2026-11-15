@@ -37,9 +37,16 @@ class MainActivity : ComponentActivity() {
     var hd = false
     val bags = HashMap<String, ArrayDeque<Uri>>()
     val prefs by lazy { getSharedPreferences("folders", 0) }
+    val sett by lazy { getSharedPreferences("settings", 0) }
+    lateinit var uiSp: Spinner; lateinit var uiSb: SeekBar; lateinit var uiWb: SeekBar; lateinit var uiHb: SeekBar; lateinit var uiShb: SeekBar; lateinit var uiDb: SeekBar
 
     val pickVo = registerForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) { vo = u; voMs = dur(u); refresh() } }
-    val pickBr = registerForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) { br = u; brMs = dur(u); refresh() } }
+    val pickBr = registerForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        if (u != null) {
+            try { contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Exception) {}
+            br = u; brMs = dur(u); sett.edit().putString("broll", u.toString()).apply(); refresh()
+        }
+    }
     val pickDir = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { u ->
         if (u != null) {
             contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -91,7 +98,7 @@ class MainActivity : ComponentActivity() {
         seqIn = EditText(this); seqIn.hint = "sad:2, happy:4, shocked  (:seconds is optional)"; seqIn.setTextColor(Color.WHITE); seqIn.setHintTextColor(Color.GRAY)
         val t = TextView(this); t.text = "EmotionCut Studio"; t.textSize = 24f; t.setTextColor(Color.WHITE); col.addView(t)
         btn("1. Select voiceover", col) { pickVo.launch(arrayOf("audio/*")) }
-        btn("2. Select B-roll video", col) { pickBr.launch(arrayOf("video/*")) }
+        btn("2. Select B-roll video (saved as default)", col) { pickBr.launch(arrayOf("video/*")) }
         btn("3. + Add Emotion Folder", col) { pickDir.launch(null) }
         btn("3b. + Add ALL emotion folders (pick the parent folder)", col) { pickParent.launch(null) }
         btn("Remove all folders", col) { prefs.edit().clear().apply(); scanAll() }
@@ -145,8 +152,14 @@ class MainActivity : ComponentActivity() {
         col.addView(db)
         val cb = CheckBox(this); cb.setTextColor(Color.WHITE); cb.text = "1080p export (sharper, slower, uses more memory)"
         cb.setOnCheckedChangeListener { _, c -> hd = c }; col.addView(cb)
+        uiSp = sp; uiSb = sb; uiWb = wb; uiHb = hb; uiShb = shb; uiDb = db
+        btn("Save these settings as a preset", col) { savePreset() }
+        btn("Load a preset", col) { loadPreset() }
         btn("4. Generate sequence", col) { generate() }
         btn("5. Export MP4", col) { export() }
+        btn("Clear default B-roll", col) { br = null; brMs = 0; sett.edit().remove("broll").apply(); refresh() }
+        sett.getString("broll", null)?.let { try { val u = Uri.parse(it); brMs = dur(u); br = u } catch (e: Exception) { br = null; brMs = 0; status.text = "Saved B-roll not found, please select it again" } }
+        sett.getString("lastPreset", null)?.let { applyPreset(it) }
         col.addView(status); col.addView(info); scanAll()
     }
 
@@ -173,6 +186,37 @@ class MainActivity : ComponentActivity() {
             if (equal && i >= items.size) break
         }
         segs = out; status.text = "Generated ${out.size} segments for ${d.toInt()}s"; refresh()
+    }
+
+    fun applyPreset(n: String) {
+        val p = (sett.getString("preset:$n", "") ?: "").split(",")
+        if (p.size != 6) return
+        uiSp.setSelection(p[0].toInt()); uiSb.progress = p[1].toInt() - 5; uiWb.progress = p[2].toInt() - 10
+        uiHb.progress = p[3].toInt() - 10; uiShb.progress = p[4].toInt(); uiDb.progress = p[5].toInt()
+        sett.edit().putString("lastPreset", n).apply(); status.text = "Preset \"$n\" applied"
+    }
+
+    fun savePreset() {
+        val et = EditText(this); et.hint = "Preset name"
+        AlertDialog.Builder(this).setTitle("Save settings as preset").setView(et)
+            .setPositiveButton("Save") { _, _ ->
+                val n = et.text.toString().trim()
+                if (n.isNotEmpty()) {
+                    sett.edit().putString("preset:$n", "$pos,$sizePct,$sizeWide,$maxH,$sharp,${uiDb.progress}").putString("lastPreset", n).apply()
+                    status.text = "Saved preset \"$n\" (opens automatically next time)"
+                }
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    fun loadPreset() {
+        val names = sett.all.keys.filter { it.startsWith("preset:") }.map { it.removePrefix("preset:") }.sorted()
+        if (names.isEmpty()) { status.text = "No presets saved yet"; return }
+        AlertDialog.Builder(this).setTitle("Choose preset").setItems(names.toTypedArray()) { _, i -> applyPreset(names[i]) }
+            .setNeutralButton("Delete one") { _, _ ->
+                AlertDialog.Builder(this).setTitle("Delete which preset?").setItems(names.toTypedArray()) { _, i ->
+                    sett.edit().remove("preset:" + names[i]).apply(); status.text = "Deleted \"${names[i]}\""
+                }.show()
+            }.show()
     }
 
     fun ch(c: Int, u: Int, d: Int, l: Int, r: Int, sh: Int, a: Float): Int {
